@@ -11,7 +11,7 @@ export default function Gltfviewer(){
         scene.background = new THREE.Color(0x0b1020);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth /  window.innerHeight, 0.1, 1000);
-        camera.position.set(7,7,7);
+        camera.position.set(6, 6, 6);
         camera.lookAt(0, 0, 0);
 
         const renderer =  new THREE.WebGLRenderer({antialias: true});
@@ -74,7 +74,7 @@ export default function Gltfviewer(){
 
         const animate=()=>{
             requestAnimationFrame(animate);
-            controls.target.set(4, 0, 0);
+            controls.target.set(6, 0, 0);
             controls.update();
             renderer.render(scene, camera);
         };
