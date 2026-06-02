@@ -42,7 +42,7 @@ export default function Gltfviewer(){
                         opacity: 0.5});
                     }
                 });
-            // obj.updateMatrixWorld(true);
+
             const box = new THREE.Box3().setFromObject(obj);
             const size = box.getSize(new THREE.Vector3());
             const center = box.getCenter(new THREE.Vector3());
@@ -54,16 +54,16 @@ export default function Gltfviewer(){
 
             obj.scale.setScalar(scale);
 
-            // 2. Recompute box after scaling
-            obj.updateMatrixWorld(true);
+            // // 2. Recompute box after scaling
+            // obj.updateMatrixWorld(true);
 
-            // 3. Center again after scaling
-            const box2 = new THREE.Box3().setFromObject(obj);
-            const center2 = box2.getCenter(new THREE.Vector3());
-            obj.position.sub(center2);
+            // // 3. Center again after scaling
+            // const box2 = new THREE.Box3().setFromObject(obj);
+            // const center2 = box2.getCenter(new THREE.Vector3());
+            // obj.position.sub(center2);
 
             // 4. Spread models
-            obj.position.x += index * 3;
+            // obj.position.x += index * 3;
             obj.updateMatrixWorld(true);
             scene.add(obj);
             },undefined,
@@ -71,7 +71,7 @@ export default function Gltfviewer(){
             console.error(`Error loading ${file}:`,error);
         })
         })
-
+        
         const animate=()=>{
             requestAnimationFrame(animate);
             controls.target.set(6, 0, 0);
