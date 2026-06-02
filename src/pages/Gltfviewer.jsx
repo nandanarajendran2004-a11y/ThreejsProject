@@ -29,6 +29,47 @@ export default function Gltfviewer(){
         dirLight.position.set(5, 5, 5);
         scene.add(dirLight);
 
+        //Raycaster
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        let selectedObject = null;
+        let previousColor = null;
+
+        const highlight = (object) => {
+            if (!object) return;
+
+            // restore previous
+            if (selectedObject) {
+                selectedObject.material.color.set(previousColor);
+            }
+
+            selectedObject = object;
+            previousColor = object.material.color.getHex();
+
+            object.material.color.set(0x00ff00); // highlight color (green)
+        };
+
+        const onClick = (event) => {
+            const rect = renderer.domElement.getBoundingClientRect();
+
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            const intersects = raycaster.intersectObjects(scene.children, true);
+
+            if (intersects.length > 0) {
+                const clicked = intersects[0].object;
+
+                if (clicked.isMesh) {
+                    highlight(clicked);
+                }
+            }
+        };
+        renderer.domElement.addEventListener("click", onClick);
+
         const loader = new OBJLoader();
         const modelFiles = ["/models/grain_holds/CH01.obj","/models/grain_holds/CH02.obj","/models/grain_holds/CH03.obj","/models/grain_holds/CH04.obj","/models/grain_holds/CH05.obj"];
 
@@ -99,4 +140,4 @@ export default function Gltfviewer(){
     return(
         <div ref={mountRef} style={{position: "fixed", top: 0, left: 0, width:"100%", height:"100%",overflow:"hidden"}}/>
     );
-}
+} 
