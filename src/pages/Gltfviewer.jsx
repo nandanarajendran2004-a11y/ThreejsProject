@@ -6,24 +6,31 @@ import "./Gltfviewer.css";
 
 export default function Gltfviewer() {
     const mountRef = useRef();
-    const [clipPercent, setClipPercent] = useState(0);
 
-    const clippingPlaneRef = useRef(
-        new THREE.Plane(new THREE.Vector3(0, -1, 0), 0)
-    );
+    const [clip, setClip] = useState({ x: 0, y: 0, z: 0 });
 
-    const modelBoundsRef = useRef({
-        minY: 0,
-        maxY: 1
+    // 3 proper clipping planes
+    const clippingPlanesRef = useRef([
+        new THREE.Plane(new THREE.Vector3(0, -1, 0), 0), // Y
+        new THREE.Plane(new THREE.Vector3(1, 0, 0), 0),  // X
+        new THREE.Plane(new THREE.Vector3(0, 0, 1), 0)   // Z
+    ]);
+
+    const boundsRef = useRef({
+        min: new THREE.Vector3(),
+        max: new THREE.Vector3()
     });
 
     const readyRef = useRef(false);
+
     useEffect(() => {
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x0b1020);
 
         const shipGroup = new THREE.Group();
         scene.add(shipGroup);
+
+        
 
         const camera = new THREE.PerspectiveCamera(
             75,
@@ -32,7 +39,7 @@ export default function Gltfviewer() {
             1000
         );
 
-        camera.position.set(5,5,5);
+        camera.position.set(5, 5, 5);
         camera.lookAt(0, 0, 0);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -49,6 +56,7 @@ export default function Gltfviewer() {
         dirLight.position.set(5, 5, 5);
         scene.add(dirLight);
 
+        const planes = clippingPlanesRef.current;
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
 
@@ -95,10 +103,10 @@ export default function Gltfviewer() {
         ];
 
         let loadedCount = 0;
-        const plane = clippingPlaneRef.current;
 
         modelFiles.forEach((file) => {
             loader.load(file, (obj) => {
+
                 obj.traverse((child) => {
                     if (child.isMesh) {
                         child.material = new THREE.MeshStandardMaterial({
@@ -106,7 +114,7 @@ export default function Gltfviewer() {
                             side: THREE.DoubleSide,
                             transparent: true,
                             opacity: 0.5,
-                            clippingPlanes: [plane]
+                            clippingPlanes: planes
                         });
                     }
                 });
@@ -115,8 +123,7 @@ export default function Gltfviewer() {
                 const box = new THREE.Box3().setFromObject(obj);
                 const size = box.getSize(new THREE.Vector3());
                 const maxDim = Math.max(size.x, size.y, size.z);
-                const scale = 2 / maxDim;
-                obj.scale.setScalar(scale);
+                obj.scale.setScalar(2 / maxDim);
 
                 obj.updateMatrixWorld(true);
 
@@ -125,38 +132,34 @@ export default function Gltfviewer() {
 
                 if (loadedCount === modelFiles.length) {
 
-                    // center whole ship
+                    // CENTER SHIP
                     const shipBox = new THREE.Box3().setFromObject(shipGroup);
-                    const shipCenter = shipBox.getCenter(new THREE.Vector3());
+                    const center = shipBox.getCenter(new THREE.Vector3());
 
-                    shipGroup.position.sub(shipCenter);
+                    shipGroup.position.sub(center);
                     shipGroup.updateMatrixWorld(true);
 
-                    // compute final bounds AFTER centering
+                    // FINAL BOUNDS (IMPORTANT)
                     const finalBox = new THREE.Box3().setFromObject(shipGroup);
 
-                    modelBoundsRef.current = {
-                        minY: finalBox.min.y,
-                        maxY: finalBox.max.y
-                    };
+                    boundsRef.current.min.copy(finalBox.min);
+                    boundsRef.current.max.copy(finalBox.max);
 
-                    plane.normal.set(0, -1, 0);
-                    const initialPosition = finalBox.min.y;
-                    plane.constant = -initialPosition;
+                    const min = finalBox.min;
+                    const max = finalBox.max;
 
-                    // apply clipping
-                    scene.traverse((child) => {
-                        if (child.isMesh) {
-                            child.material.clippingPlanes = [plane];
-                            child.material.needsUpdate = true;
-                        }
-                    });
+                    // FIXED PLANES (NO MAGIC NUMBERS)
+                    planes[0].normal.set(0, -1, 0);
+                    planes[0].constant = -min.y;
+
+                    planes[1].normal.set(1, 0, 0);
+                    planes[1].constant = -min.x;
+
+                    planes[2].normal.set(0, 0, 1);
+                    planes[2].constant = -min.z;
 
                     renderer.localClippingEnabled = true;
-
-                    // force first render (fix blank screen issue)
                     readyRef.current = true;
-                    renderer.render(scene, camera);
                 }
             });
         });
@@ -165,6 +168,7 @@ export default function Gltfviewer() {
             requestAnimationFrame(animate);
             controls.target.set(0, 0, 0);
             controls.update();
+
             if (readyRef.current) {
                 renderer.render(scene, camera);
             }
@@ -182,48 +186,89 @@ export default function Gltfviewer() {
 
         return () => {
             window.removeEventListener("resize", handleResize);
-            renderer.domElement.removeEventListener("click", onClick);
             renderer.dispose();
-            if (mountRef.current) {
-                mountRef.current.removeChild(renderer.domElement);
-            }
+            mountRef.current?.removeChild(renderer.domElement);
         };
     }, []);
 
-    const handleSliderChange = (e) => {
-        const percent = Number(e.target.value);
-        setClipPercent(percent);
+    // UPDATE SLIDERS
+    const handleClipChange = (axis, value) => {
+        setClip(prev => {
+            const updated = { ...prev, [axis]: Number(value) };
 
-        const { minY, maxY } = modelBoundsRef.current;
+            const planes = clippingPlanesRef.current;
+            const { min, max } = boundsRef.current;
 
-        const position = minY + (maxY - minY) * (percent / 100);
+            // Y (fill)
+            planes[0].constant =
+                -(min.y + (max.y - min.y) * (updated.y / 100));
 
-        clippingPlaneRef.current.constant = -position;
+            // X (left-right)
+            planes[1].constant =
+                -(min.x + (max.x - min.x) * (updated.x / 100));
+
+            // Z (front-back)
+            planes[2].constant =
+                -(min.z + (max.z - min.z) * (updated.z / 100));
+
+            return updated;
+        });
     };
 
     return (
-        <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
-            <div
-                ref={mountRef}
-                style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", overflow: "hidden" }}
-            />
+        <div style={{ width: "100vw", height: "100vh", overflow: "hidden" }}>
+            <div ref={mountRef} style={{position: "fixed", top: 0, left: 0, width:"100%", height:"100%",overflow:"hidden"}} />
+<div className="slider-container">
 
-            <div className="slider-container">
-                <div className="slider-title">Clipping Percentage</div>
+    <div className="slider-block">
+        <label>X Clip</label>
 
-                <input
-                    className="slider-input"
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={clipPercent}
-                    onChange={handleSliderChange}
-                />
+        <input
+            type="range"
+            min={0}
+            max={100}
+            value={clip.x}
+            onChange={(e) => handleClipChange("x", e.target.value)}
+        />
 
-                <div className="slider-value">
-                    {clipPercent}% clipped
-                </div>
-            </div>
+        <div className="slider-value">
+            {clip.x}% clipped
+        </div>
+    </div>
+
+    <div className="slider-block">
+        <label>Y Clip</label>
+
+        <input
+            type="range"
+            min={0}
+            max={100}
+            value={clip.y}
+            onChange={(e) => handleClipChange("y", e.target.value)}
+        />
+
+        <div className="slider-value">
+            {clip.y}% clipped
+        </div>
+    </div>
+
+    <div className="slider-block">
+        <label>Z Clip</label>
+
+        <input
+            type="range"
+            min={0}
+            max={100}
+            value={clip.z}
+            onChange={(e) => handleClipChange("z", e.target.value)}
+        />
+
+        <div className="slider-value">
+            {clip.z}% clipped
+        </div>
+    </div>
+
+</div>
         </div>
     );
 }
