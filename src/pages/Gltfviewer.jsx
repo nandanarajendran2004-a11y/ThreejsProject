@@ -8,6 +8,7 @@ export default function Gltfviewer() {
     const mountRef = useRef();
 
     const [clip, setClip] = useState({ x: 0, y: 0, z: 0 });
+    const fillTargets = useRef([0, 0, 0, 0, 0]);
 
     // 3 proper clipping planes
     const clippingPlanesRef = useRef([
@@ -22,15 +23,14 @@ export default function Gltfviewer() {
     });
 
     const readyRef = useRef(false);
-
+const waterRef = useRef([]);
+const holdsRef = useRef([]);
     useEffect(() => {
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x0b1020);
 
         const shipGroup = new THREE.Group();
         scene.add(shipGroup);
-
-        
 
         const camera = new THREE.PerspectiveCamera(
             75,
@@ -104,7 +104,7 @@ export default function Gltfviewer() {
 
         let loadedCount = 0;
 
-        modelFiles.forEach((file) => {
+        modelFiles.forEach((file, index) => {
             loader.load(file, (obj) => {
 
                 obj.traverse((child) => {
@@ -128,6 +128,8 @@ export default function Gltfviewer() {
                 obj.updateMatrixWorld(true);
 
                 shipGroup.add(obj);
+                holdsRef.current.push(obj);
+
                 loadedCount++;
 
                 if (loadedCount === modelFiles.length) {
@@ -138,7 +140,52 @@ export default function Gltfviewer() {
 
                     shipGroup.position.sub(center);
                     shipGroup.updateMatrixWorld(true);
+// STEP 1: build holds AFTER final positioning
+holdsRef.current.forEach((hold) => {
+    const waterHeight = 0.01;
 
+    const box = new THREE.Box3().setFromObject(hold);
+
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+
+    // STEP 2: convert WORLD → SHIP LOCAL space
+    const localCenter = shipGroup.worldToLocal(center.clone());
+    const localMinY = shipGroup.worldToLocal(
+        new THREE.Vector3(0, box.min.y, 0)
+    ).y;
+
+    // STEP 3: water geometry
+    const waterGeo = new THREE.BoxGeometry(
+        size.x * 0.9,
+        size.y,
+        size.z * 0.9
+    );
+
+    const waterMat = new THREE.MeshStandardMaterial({
+        color: 0x2196f3,
+        transparent: true,
+        opacity: 0.5
+    });
+
+    const waterMesh = new THREE.Mesh(waterGeo, waterMat);
+
+    // STEP 4: NOW position correctly in shipGroup space
+    waterMesh.position.set(
+        localCenter.x,
+        localMinY,
+        localCenter.z
+    );
+
+    shipGroup.add(waterMesh);
+
+    // STEP 5: store correct values
+    waterRef.current.push({
+        mesh: waterMesh,
+        minY: localMinY,
+        height: size.y
+    });
+});
                     // FINAL BOUNDS (IMPORTANT)
                     const finalBox = new THREE.Box3().setFromObject(shipGroup);
 
@@ -164,15 +211,30 @@ export default function Gltfviewer() {
             });
         });
 
-        const animate = () => {
-            requestAnimationFrame(animate);
-            controls.target.set(0, 0, 0);
-            controls.update();
+const animate = () => {
+    requestAnimationFrame(animate);
 
-            if (readyRef.current) {
-                renderer.render(scene, camera);
-            }
-        };
+    controls.target.set(0, 0, 0);
+    controls.update();
+
+    //smooth fill animation
+    waterRef.current.forEach((water, i) => {
+        const target = fillTargets.current[i];
+
+        const current = water.mesh.userData.fill || 0;
+
+        // smooth interpolation (LERP)
+        const next = THREE.MathUtils.lerp(current, target, 0.05);
+
+        water.mesh.userData.fill = next;
+
+        applyFill(water, next);
+    });
+
+    if (readyRef.current) {
+        renderer.render(scene, camera);
+    }
+};
 
         animate();
 
@@ -190,6 +252,30 @@ export default function Gltfviewer() {
             mountRef.current?.removeChild(renderer.domElement);
         };
     }, []);
+
+const handleAction = (action) => {
+    switch (action) {
+        case "fillHold1":
+            fillTargets.current[0] = 100;
+            break;
+        case "fillHold2":
+            fillTargets.current[1] = 100;
+            break;
+        case "fillHold3":
+            fillTargets.current[2] = 100;
+            break;
+        case "fillHold4":
+            fillTargets.current[3] = 100;
+            break;
+        case "fillHold5":
+            fillTargets.current[4] = 100;
+            break;
+
+        case "reset":
+            fillTargets.current = [0, 0, 0, 0, 0];
+            break;
+    }
+};
 
     // UPDATE SLIDERS
     const handleClipChange = (axis, value) => {
@@ -214,61 +300,78 @@ export default function Gltfviewer() {
             return updated;
         });
     };
+const applyFill = (water, percent) => {
+    const { mesh, minY, height } = water;
 
-    return (
-        <div style={{ width: "100vw", height: "100vh", overflow: "hidden" }}>
-            <div ref={mountRef} style={{position: "fixed", top: 0, left: 0, width:"100%", height:"100%",overflow:"hidden"}} />
-<div className="slider-container">
+    const scaleY = percent / 100;
 
-    <div className="slider-block">
-        <label>X Clip</label>
+    mesh.scale.y = scaleY;
 
-        <input
-            type="range"
-            min={0}
-            max={100}
-            value={clip.x}
-            onChange={(e) => handleClipChange("x", e.target.value)}
+    mesh.position.y = minY + (height * scaleY) / 2;
+};
+
+return (
+    <div style={{ width: "100vw", height: "100vh", overflow: "hidden" }}>
+        <div
+            ref={mountRef}
+            style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: "100%",
+                overflow: "hidden",
+            }}
         />
 
-        <div className="slider-value">
-            {clip.x}% clipped
+        {/* Left Control Panel */}
+        <div className="control-panel">
+            <div className="slider-block">
+                <label>X Clip</label>
+                <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={clip.x}
+                    onChange={(e) => handleClipChange("x", e.target.value)}
+                />
+                <div className="slider-value">{clip.x}% clipped</div>
+            </div>
+
+            <div className="slider-block">
+                <label>Y Clip</label>
+                <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={clip.y}
+                    onChange={(e) => handleClipChange("y", e.target.value)}
+                />
+                <div className="slider-value">{clip.y}% clipped</div>
+            </div>
+
+            <div className="slider-block">
+                <label>Z Clip</label>
+                <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={clip.z}
+                    onChange={(e) => handleClipChange("z", e.target.value)}
+                />
+                <div className="slider-value">{clip.z}% clipped</div>
+            </div>
+
+            <div className="button-container">
+                <button onClick={() => handleAction("fillHold1")}>Fill Hold 1</button>
+                <button onClick={() => handleAction("fillHold2")}>Fill Hold 2</button>
+                <button onClick={() => handleAction("fillHold3")}>Fill Hold 3</button>
+                <button onClick={() => handleAction("fillHold4")}>Fill Hold 4</button>
+                <button onClick={() => handleAction("fillHold5")}>Fill Hold 5</button>
+                <button onClick={() => handleAction("stop")}>Stop</button>
+                <button onClick={() => handleAction("reset")}>Reset</button>
+            </div>
         </div>
     </div>
-
-    <div className="slider-block">
-        <label>Y Clip</label>
-
-        <input
-            type="range"
-            min={0}
-            max={100}
-            value={clip.y}
-            onChange={(e) => handleClipChange("y", e.target.value)}
-        />
-
-        <div className="slider-value">
-            {clip.y}% clipped
-        </div>
-    </div>
-
-    <div className="slider-block">
-        <label>Z Clip</label>
-
-        <input
-            type="range"
-            min={0}
-            max={100}
-            value={clip.z}
-            onChange={(e) => handleClipChange("z", e.target.value)}
-        />
-
-        <div className="slider-value">
-            {clip.z}% clipped
-        </div>
-    </div>
-
-</div>
-        </div>
-    );
+);
 }
