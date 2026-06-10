@@ -8,7 +8,13 @@ export default function Gltfviewer() {
     const mountRef = useRef();
 
     const [clip, setClip] = useState({ x: 0, y: 0, z: 0 });
-    const fillTargets = useRef([0, 0, 0, 0, 0]);
+    const fillTargets = useRef({
+    1: 0,
+    2: 0,
+    3: 0,
+    4: 0,
+    5: 0
+});
 
     // 3 proper clipping planes
     const clippingPlanesRef = useRef([
@@ -25,6 +31,7 @@ export default function Gltfviewer() {
     const readyRef = useRef(false);
 const waterRef = useRef([]);
 const holdsRef = useRef([]);
+const waterPlanesRef = useRef([]);
     useEffect(() => {
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x0b1020);
@@ -128,7 +135,8 @@ const holdsRef = useRef([]);
                 obj.updateMatrixWorld(true);
 
                 shipGroup.add(obj);
-                holdsRef.current.push(obj);
+                obj.userData.holdNumber = index + 1;
+holdsRef.current.push(obj);
 
                 loadedCount++;
 
@@ -142,49 +150,46 @@ const holdsRef = useRef([]);
                     shipGroup.updateMatrixWorld(true);
 // STEP 1: build holds AFTER final positioning
 holdsRef.current.forEach((hold) => {
-    const waterHeight = 0.01;
-
     const box = new THREE.Box3().setFromObject(hold);
 
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
+const size = box.getSize(new THREE.Vector3());
 
-    // STEP 2: convert WORLD → SHIP LOCAL space
-    const localCenter = shipGroup.worldToLocal(center.clone());
-    const localMinY = shipGroup.worldToLocal(
-        new THREE.Vector3(0, box.min.y, 0)
-    ).y;
+const localMinY = box.min.y;
+const localMaxY = box.max.y;
 
-    // STEP 3: water geometry
-    const waterGeo = new THREE.BoxGeometry(
-        size.x * 0.9,
-        size.y,
-        size.z * 0.9
-    );
+const fillPlane = new THREE.Plane(
+    new THREE.Vector3(0, -1, 0),
+    localMinY - 0.001
+);
 
-    const waterMat = new THREE.MeshStandardMaterial({
-        color: 0x2196f3,
-        transparent: true,
-        opacity: 0.5
-    });
+const waterObj = hold.clone(true);
 
-    const waterMesh = new THREE.Mesh(waterGeo, waterMat);
+waterObj.traverse((child) => {
+    if (child.isMesh) {
 
-    // STEP 4: NOW position correctly in shipGroup space
-    waterMesh.position.set(
-        localCenter.x,
-        localMinY,
-        localCenter.z
-    );
+        child.material = new THREE.MeshStandardMaterial({
+            color: 0x0077be,
+            transparent: true,
+            opacity: 0.6,
+            side: THREE.DoubleSide,
+            clippingPlanes: [fillPlane]
+        });
 
-    shipGroup.add(waterMesh);
+        child.renderOrder = 1;
+    }
+});
 
-    // STEP 5: store correct values
-    waterRef.current.push({
-        mesh: waterMesh,
-        minY: localMinY,
-        height: size.y
-    });
+shipGroup.add(waterObj);
+
+waterPlanesRef.current.push(fillPlane);
+
+waterRef.current.push({
+    holdNumber: hold.userData.holdNumber,
+    mesh: waterObj,
+    minY: localMinY,
+    height: size.y,
+    plane: fillPlane,
+});
 });
                     // FINAL BOUNDS (IMPORTANT)
                     const finalBox = new THREE.Box3().setFromObject(shipGroup);
@@ -218,18 +223,24 @@ const animate = () => {
     controls.update();
 
     //smooth fill animation
-    waterRef.current.forEach((water, i) => {
-        const target = fillTargets.current[i];
+waterRef.current.forEach((water) => {
 
-        const current = water.mesh.userData.fill || 0;
+    const target =
+        fillTargets.current[water.holdNumber] ?? 0;
 
-        // smooth interpolation (LERP)
-        const next = THREE.MathUtils.lerp(current, target, 0.05);
+    const current =
+        water.mesh.userData.fill || 0;
 
-        water.mesh.userData.fill = next;
+    const next = THREE.MathUtils.lerp(
+        current,
+        target,
+        0.05
+    );
 
-        applyFill(water, next);
-    });
+    water.mesh.userData.fill = next;
+
+    applyFill(water, next);
+});
 
     if (readyRef.current) {
         renderer.render(scene, camera);
@@ -256,24 +267,32 @@ const animate = () => {
 const handleAction = (action) => {
     switch (action) {
         case "fillHold1":
-            fillTargets.current[0] = 100;
-            break;
-        case "fillHold2":
-            fillTargets.current[1] = 100;
-            break;
-        case "fillHold3":
-            fillTargets.current[2] = 100;
-            break;
-        case "fillHold4":
-            fillTargets.current[3] = 100;
-            break;
-        case "fillHold5":
-            fillTargets.current[4] = 100;
-            break;
+    fillTargets.current[1] = 100;
+    break;
 
-        case "reset":
-            fillTargets.current = [0, 0, 0, 0, 0];
-            break;
+case "fillHold2":
+    fillTargets.current[2] = 100;
+    break;
+       case "fillHold3":
+    fillTargets.current[3] = 100;
+    break;
+
+case "fillHold4":
+    fillTargets.current[4] = 100;
+    break;
+        case "fillHold5":
+    fillTargets.current[5] = 100;
+    break;
+
+case "reset":
+    fillTargets.current = {
+        1: 0,
+        2: 0,
+        3: 0,
+        4: 0,
+        5: 0
+    };
+    break;
     }
 };
 
@@ -301,13 +320,13 @@ const handleAction = (action) => {
         });
     };
 const applyFill = (water, percent) => {
-    const { mesh, minY, height } = water;
 
-    const scaleY = percent / 100;
+    const { minY, height, plane } = water;
 
-    mesh.scale.y = scaleY;
+    const fillHeight =
+        minY + (height * percent) / 100;
 
-    mesh.position.y = minY + (height * scaleY) / 2;
+    plane.constant = fillHeight;
 };
 
 return (
