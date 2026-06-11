@@ -32,6 +32,9 @@ export default function Gltfviewer() {
 const waterRef = useRef([]);
 const holdsRef = useRef([]);
 const waterPlanesRef = useRef([]);
+const isPausedRef = useRef(false);
+const speedRef = useRef(0.03); // default speed
+const [speedUI, setSpeedUI] = useState(30);
     useEffect(() => {
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x0b1020);
@@ -136,7 +139,7 @@ const waterPlanesRef = useRef([]);
 
                 shipGroup.add(obj);
                 obj.userData.holdNumber = index + 1;
-holdsRef.current.push(obj);
+                holdsRef.current.push(obj);
 
                 loadedCount++;
 
@@ -172,7 +175,7 @@ waterObj.traverse((child) => {
             transparent: true,
             opacity: 0.6,
             side: THREE.DoubleSide,
-            clippingPlanes: [fillPlane]
+            clippingPlanes: [...planes, fillPlane]
         });
 
         child.renderOrder = 1;
@@ -225,23 +228,20 @@ const animate = () => {
     //smooth fill animation
 waterRef.current.forEach((water) => {
 
-    const target =
-        fillTargets.current[water.holdNumber] ?? 0;
+    const target = fillTargets.current[water.holdNumber] ?? 0;
+    const current = water.mesh.userData.fill || 0;
 
-    const current =
-        water.mesh.userData.fill || 0;
+    let next;
 
-    const next = THREE.MathUtils.lerp(
-        current,
-        target,
-        0.05
-    );
+    if (isPausedRef.current) {
+        next = current; // fully freeze
+    } else {
+        next = THREE.MathUtils.lerp(current, target, speedRef.current); // slower = more realistic
+    }
 
     water.mesh.userData.fill = next;
-
     applyFill(water, next);
 });
-
     if (readyRef.current) {
         renderer.render(scene, camera);
     }
@@ -263,24 +263,31 @@ waterRef.current.forEach((water) => {
             mountRef.current?.removeChild(renderer.domElement);
         };
     }, []);
-
+const resumeAnimation = () => {
+    isPausedRef.current = false;
+};
 const handleAction = (action) => {
     switch (action) {
         case "fillHold1":
+      resumeAnimation();
     fillTargets.current[1] = 100;
     break;
 
 case "fillHold2":
+    resumeAnimation();
     fillTargets.current[2] = 100;
     break;
        case "fillHold3":
+     resumeAnimation();
     fillTargets.current[3] = 100;
     break;
 
 case "fillHold4":
+    resumeAnimation();
     fillTargets.current[4] = 100;
     break;
         case "fillHold5":
+    resumeAnimation();
     fillTargets.current[5] = 100;
     break;
 
@@ -292,6 +299,14 @@ case "reset":
         4: 0,
         5: 0
     };
+
+    isPausedRef.current = false;
+    waterRef.current.forEach(w => {
+        w.mesh.userData.fill = 0;
+    }); // IMPORTANT
+    break;
+case "stop":
+    isPausedRef.current = !isPausedRef.current;
     break;
     }
 };
@@ -328,7 +343,13 @@ const applyFill = (water, percent) => {
 
     plane.constant = fillHeight;
 };
+const handleSpeedChange = (value) => {
+    const v = Number(value);
 
+    setSpeedUI(v); // triggers re-render (UI update)
+
+    speedRef.current = THREE.MathUtils.mapLinear(v, 0, 100, 0.001, 0.1);
+};
 return (
     <div style={{ width: "100vw", height: "100vh", overflow: "hidden" }}>
         <div
@@ -390,6 +411,21 @@ return (
                 <button onClick={() => handleAction("stop")}>Stop</button>
                 <button onClick={() => handleAction("reset")}>Reset</button>
             </div>
+            <div className="slider-block">
+    <label>Fill Speed</label>
+
+    <input
+        type="range"
+        min={0}
+        max={100}
+        defaultValue={30}
+        onChange={(e) => handleSpeedChange(e.target.value)}
+    />
+
+    <div className="slider-value">
+        Speed: {speedUI}%
+    </div>
+</div>
         </div>
     </div>
 );
